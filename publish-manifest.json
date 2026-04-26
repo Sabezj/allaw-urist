@@ -1,0 +1,43 @@
+﻿{
+    "generated_at":  "2026-04-26T21:47:59",
+    "source_root":  "F:\\GitHub\\vangZ_strict_patched_plus_voice_assistant",
+    "publish_root":  "F:\\GitHub\\vangZ_strict_patched_plus_voice_assistant\\publish\\lawvoice-official-repo",
+    "zip_path":  "F:\\GitHub\\vangZ_strict_patched_plus_voice_assistant\\publish\\lawvoice-official-repo.zip",
+    "thesis_included":  true,
+    "root_files":  [
+                       ".dockerignore",
+                       ".env.example",
+                       "config.js",
+                       "docker-compose.yml",
+                       "Dockerfile",
+                       "ecosystem.config.cjs",
+                       "embeddingsWorker.js",
+                       "jest.config.js",
+                       "package-lock.json",
+                       "package.json",
+                       "server.js",
+                       "webpack.config.cjs"
+                   ],
+    "script_files":  [
+                         "scripts/setup_windows.ps1",
+                         "scripts/setup_windows_nodocker.ps1",
+                         "scripts/setup_wsl.sh",
+                         "scripts/setup_wsl_nodocker.sh",
+                         "scripts/start_all.ps1",
+                         "scripts/start_services.bat"
+                     ],
+    "doc_files":  [
+                      "docs/lawvoice_general_prompt.md",
+                      "docs/tts_module.md",
+                      "docs/voice-assistant-architecture.md",
+                      "docs/node_patch/intentHandlers.sample.js",
+                      "docs/node_patch/searchClient.js"
+                  ],
+    "trees":  [
+                  "__tests__",
+                  "public",
+                  "src",
+                  "profiles",
+                  "services"
+              ]
+}

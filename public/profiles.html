@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LawVoice: Профили персонажей</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="brand-badge">LawVoice MVP</div>
+      <h1 class="title">Профили персонажей LawVoice</h1>
+      <p class="subtitle"><a href="/">← Вернуться к диалогу</a></p>
+    </header>
+    <main class="main">
+      <div class="profile-layout">
+        <div class="profile-list-section">
+          <h2 class="section-title">Доступные профили</h2>
+          <ul id="profile-list" class="profile-list"></ul>
+        </div>
+        <div class="profile-editor-section">
+          <h2 class="section-title">Параметры профиля</h2>
+          <form id="profile-form" class="profile-form">
+            <input type="hidden" id="profile-id">
+            <label>Имя<input type="text" id="profile-name" required></label>
+            <label>Голос<input type="text" id="profile-voice"></label>
+            <label>Настроение<input type="text" id="profile-mood"></label>
+            <label>Правила<textarea id="profile-rules" rows="3"></textarea></label>
+            <label>Инструкции<textarea id="profile-instructions" rows="6"></textarea></label>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Сохранить</button>
+              <button type="button" id="new-profile" class="btn btn-secondary">Новый профиль</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="profiles.js"></script>
+</body>
+</html>

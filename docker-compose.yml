@@ -1,0 +1,33 @@
+version: '3.8'
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/db
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - db
+      - redis
+  worker:
+    build: .
+    command: node embeddingsWorker.js
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/db
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - db
+      - redis
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+volumes:
+  pgdata:
