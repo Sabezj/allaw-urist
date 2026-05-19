@@ -10,11 +10,13 @@
     <div class="container">
         <header class="header">
             <div class="brand-badge">LawVoice MVP</div>
-            <nav class="nav-links"><a href="/profiles.html">Профили персонажей</a></nav>
+            <nav class="nav-links">
+                <a href="/admin">Администратор</a>
+                <a href="/profiles.html" data-admin-only>Профили</a>
+            </nav>
             <h1 class="title">LawVoice: Правовой диалог</h1>
             <p class="subtitle">Голосовой симулятор правовых ситуаций для подростков</p>
             <p class="strapline">Кибербуллинг • Покупки онлайн • Права в школе</p>
-
         </header>
 
         <main class="main">
@@ -33,7 +35,7 @@
                         </select>
                         <div id="adaptive-mode-state" class="adaptive-state">Режим: age=teen, anxiety=medium, risk=low</div>
                     </div>
-                    <details id="profile-details">
+                    <details id="profile-details" data-admin-only>
                         <summary>Редактировать профиль</summary>
                         <form id="profile-form" class="profile-form">
                             <label>Имя<input type="text" id="profile-name"></label>
@@ -43,7 +45,7 @@
                             <label>Инструкции<textarea id="profile-instructions" rows="4"></textarea></label>
                         </form>
                     </details>
-                    <div class="profile-buttons">
+                    <div class="profile-buttons" data-admin-only>
                         <button id="save-profile" class="btn btn-secondary">Сохранить профиль</button>
                         <button id="load-profile" class="btn btn-outline">Загрузить профиль</button>
                         <input type="file" id="profile-file" class="hidden-file-input" accept="application/json">
@@ -52,7 +54,7 @@
             </div>
 
             <!-- Панель инструкций ИИ -->
-            <div class="instructions-panel">
+            <div class="instructions-panel" data-admin-only>
                 <h2 class="section-title">Базовый промпт LawVoice</h2>
                 <div class="instructions-content">
                     <textarea
@@ -84,7 +86,7 @@
             </div>
 
             <!-- Панель продуктов -->
-            <div class="product-panel">
+            <div class="product-panel" data-admin-only>
                 <h2 class="section-title">Кейсы и материалы (MVP)</h2>
                 <div class="product-controls">
                     <button id="view-products" class="btn btn-secondary">Загрузить материалы</button>
@@ -102,7 +104,7 @@
             </div>
 
             <!-- База знаний -->
-            <div class="knowledge-panel">
+            <div class="knowledge-panel" data-admin-only>
                 <h2 class="section-title">База знаний</h2>
                 <div class="knowledge-controls">
                     <input id="knowledge-title" type="text" placeholder="Название документа (опционально)">
@@ -132,7 +134,7 @@
             </div>
 
             <!-- Раздел корзины -->
-            <div class="cart-section">
+            <div class="cart-section" data-admin-only>
                 <h2 class="section-title">Черновик плана действий</h2>
                 <table class="cart-table">
                     <thead>
@@ -147,7 +149,7 @@
             </div>
 
             <!-- Панель статуса -->
-            <div class="status-panel">
+            <div class="status-panel" data-admin-only>
                 <h2 class="section-title">Состояние сессии</h2>
                 <div class="status-item">
                     <span class="status-label">Соединение</span>
@@ -194,7 +196,7 @@
             </div>
 
             <!-- Инъекция контекста -->
-            <div class="context-injection">
+            <div class="context-injection" data-admin-only>
                 <h2 class="section-title">Подсказка для симуляции</h2>
                 <div class="context-controls">
                     <div class="context-input-area">
@@ -231,7 +233,7 @@
             </div>
 
             <!-- Панель аналитики -->
-            <div class="analytics-panel">
+            <div class="analytics-panel" data-admin-only>
                 <h2 class="section-title">Учебная аналитика</h2>
                 <div class="analytics-charts">
                     <canvas id="sessionsChart"></canvas>
@@ -248,13 +250,13 @@
             </div>
 
             <!-- Лог активности агента -->
-            <div class="activity-section">
+            <div class="activity-section" data-admin-only>
                 <h2 class="section-title">Журнал действий</h2>
                 <div id="agent-activity-log" class="activity-log"></div>
             </div>
 
             <!-- Панель отладки -->
-            <div class="debug-panel">
+            <div class="debug-panel" data-admin-only>
                 <h2 class="section-title">Техническая панель</h2>
                 <div id="debug-content" class="debug-content">
                     <h3>Использование API и стоимость</h3>
@@ -307,13 +309,28 @@
                     <pre id="event-log" class="debug-text">Ожидание событий...</pre>
                 </div>
             </div>
+
+            <div class="debug-panel" data-admin-only>
+                <h2 class="section-title">Observability</h2>
+                <div class="instructions-info">
+                    <small>
+                        <span class="tip-label">Мониторинг:</span> Grafana и Prometheus доступны только после входа администратора.
+                    </small>
+                </div>
+                <div class="form-actions">
+                    <a id="grafana-link" class="btn btn-outline" href="http://127.0.0.1:3001" target="_blank" rel="noreferrer">Grafana</a>
+                    <a id="prometheus-link" class="btn btn-outline" href="http://127.0.0.1:9090" target="_blank" rel="noreferrer">Prometheus</a>
+                    <a id="metrics-link" class="btn btn-outline" href="/metrics" target="_blank" rel="noreferrer">Metrics</a>
+                </div>
+                <div id="observability-status" class="knowledge-status">Панель мониторинга доступна администратору.</div>
+            </div>
         </main>
 
         <!-- Футер -->
         <footer class="footer">
             <p>LawVoice MVP • Голосовые правовые симуляции для подростков • OpenAI Realtime API + WebRTC</p>
             <div class="footer-links">
-                <a href="/profiles.html">Управление персонажами</a>
+                <a href="/profiles.html" data-admin-only>Управление персонажами</a>
                 <a href="https://platform.openai.com/docs/guides/realtime" target="_blank">Realtime API</a>
             </div>
         </footer>

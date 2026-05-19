@@ -3,6 +3,7 @@ param(
     [int]$PollSeconds = 2,
     [switch]$NoAutoDependencies,
     [switch]$NoAutoPySearch,
+    [switch]$WithMonitoring,
     [switch]$DetachApp,
     [int]$MaxRuntimeSec = 0
 )
@@ -292,6 +293,64 @@ function Ensure-DockerDependencies {
     }
 }
 
+function Ensure-MonitoringStack {
+    param([int]$AppPort)
+
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $dockerCmd) {
+        Write-Status "Docker is not available. Falling back to native monitoring stack." 'WARN'
+        $nativeScript = Join-Path $PSScriptRoot 'start_monitoring_native.ps1'
+        if (-not (Test-Path $nativeScript)) {
+            Write-Status "Native monitoring helper not found: $nativeScript" 'ERR'
+            return
+        }
+        & $nativeScript -AppPort $AppPort
+        return
+    }
+
+    $dockerDaemonUp = $false
+    try {
+        & docker info *> $null
+        if ($LASTEXITCODE -eq 0) { $dockerDaemonUp = $true }
+    } catch {}
+    if (-not $dockerDaemonUp) {
+        Write-Status "Docker daemon is not running. Falling back to native monitoring stack." 'WARN'
+        $nativeScript = Join-Path $PSScriptRoot 'start_monitoring_native.ps1'
+        if (-not (Test-Path $nativeScript)) {
+            Write-Status "Native monitoring helper not found: $nativeScript" 'ERR'
+            return
+        }
+        & $nativeScript -AppPort $AppPort
+        return
+    }
+
+    $hasCompose = $false
+    try {
+        & docker compose version *> $null
+        if ($LASTEXITCODE -eq 0) { $hasCompose = $true }
+    } catch {}
+
+    if (-not $hasCompose) {
+        Write-Status "docker compose is unavailable. Falling back to native monitoring stack." 'WARN'
+        $nativeScript = Join-Path $PSScriptRoot 'start_monitoring_native.ps1'
+        if (-not (Test-Path $nativeScript)) {
+            Write-Status "Native monitoring helper not found: $nativeScript" 'ERR'
+            return
+        }
+        & $nativeScript -AppPort $AppPort
+        return
+    }
+
+    Write-Status "Starting monitoring stack: prometheus, alertmanager, grafana"
+    Push-Location $ProjectRoot
+    try {
+        & docker compose up -d prometheus alertmanager grafana | Out-Host
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Wait-ForCondition {
     param(
         [scriptblock]$Check,
@@ -563,6 +622,10 @@ if (-not $NoAutoDependencies) {
 if (-not $dbUp) { Write-Status "PostgreSQL is not reachable at $($dbEndpoint.Host):$($dbEndpoint.Port)" 'WARN' }
 if (-not $redisUp) { Write-Status "Redis is not reachable at $($redisEndpoint.Host):$($redisEndpoint.Port)" 'WARN' }
 
+if ($WithMonitoring) {
+    Ensure-MonitoringStack -AppPort $port
+}
+
 if ($usePySearch) {
     $searchBaseUrl = "{0}://{1}:{2}" -f $searchEndpoint.Scheme, $searchEndpoint.Host, $searchEndpoint.Port
     $pyUp = Test-PySearchHealth -BaseUrl $searchBaseUrl
@@ -596,6 +659,12 @@ $checks = @{
 if ($usePySearch) {
     $searchBaseUrl = "{0}://{1}:{2}" -f $searchEndpoint.Scheme, $searchEndpoint.Host, $searchEndpoint.Port
     $checks['PySearch'] = { Test-PySearchHealth -BaseUrl $searchBaseUrl }
+}
+
+if ($WithMonitoring) {
+    $checks['Alertmanager'] = { Test-HttpHealth -Url 'http://127.0.0.1:9093/-/healthy' -TimeoutSec 2 }
+    $checks['Prometheus'] = { Test-HttpHealth -Url 'http://127.0.0.1:9090/-/healthy' -TimeoutSec 2 }
+    $checks['Grafana'] = { Test-HttpHealth -Url 'http://127.0.0.1:3001/api/health' -TimeoutSec 2 }
 }
 
 Write-Status "Status monitor started. Press Ctrl+C to stop." 'OK'

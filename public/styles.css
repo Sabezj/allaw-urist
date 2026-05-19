@@ -136,6 +136,58 @@ a:hover {
   background: #e2ecff;
 }
 
+.admin-session-bar {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.9rem;
+  align-items: center;
+  padding-top: 0.9rem;
+  border-top: 1px solid #d9e4f8;
+}
+
+.admin-session-summary {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.28rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid #c0d3f8;
+  background: #f4f8ff;
+  color: var(--hse-blue);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-login-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.admin-login-form input[type='password'] {
+  min-width: 240px;
+  max-width: 320px;
+}
+
+.auth-note {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.is-hidden-by-role {
+  display: none !important;
+}
+
 .title {
   font-size: clamp(1.7rem, 3.2vw, 2.6rem);
   line-height: 1.2;
@@ -259,6 +311,10 @@ a:hover {
 
 .btn-secondary:not(:disabled):hover {
   background: #2a3d57;
+}
+
+.btn-outline[href] {
+  text-decoration: none;
 }
 
 .btn-danger {
@@ -839,6 +895,216 @@ select:focus {
   font-weight: 600;
 }
 
+.admin-main {
+  align-content: start;
+}
+
+.admin-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-link-actions {
+  margin-bottom: 0.8rem;
+}
+
+.admin-log-header {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-log-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.admin-log-controls .profile-select {
+  min-width: 170px;
+}
+
+.admin-auto-refresh {
+  min-height: 42px;
+  padding: 0 0.65rem;
+  border: 1px solid #c5d7f6;
+  border-radius: 8px;
+  background: #f6f9ff;
+}
+
+.log-source-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.55rem;
+}
+
+.log-source-item {
+  display: grid;
+  gap: 0.2rem;
+  width: 100%;
+  min-height: 78px;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #c5d7f6;
+  border-radius: 8px;
+  background: #f6f9ff;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.log-source-item:hover,
+.log-source-item.is-active {
+  border-color: var(--hse-blue-soft);
+  background: #eaf1ff;
+}
+
+.log-source-title {
+  font-weight: 700;
+}
+
+.log-source-meta {
+  color: var(--success);
+  font-size: 0.86rem;
+}
+
+.log-source-meta.is-muted {
+  color: var(--text-muted);
+}
+
+.admin-log-output {
+  min-height: 360px;
+  max-height: 62vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.session-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 560px;
+  overflow: auto;
+}
+
+.session-item {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #c5d7f6;
+  border-radius: 8px;
+  background: #f6f9ff;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-item:hover,
+.session-item.is-active {
+  border-color: var(--hse-blue-soft);
+  background: #eaf1ff;
+}
+
+.session-item-title {
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.session-item-meta,
+.session-item-short,
+.session-turn-meta,
+.session-event {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.session-detail-panel {
+  align-self: start;
+}
+
+.session-detail {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.session-summary h3,
+.session-detail h3 {
+  margin: 0;
+  color: var(--hse-blue);
+  font-size: 1rem;
+}
+
+.session-summary p,
+.session-note p,
+.session-turn p {
+  margin: 0.25rem 0 0;
+}
+
+.session-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+}
+
+.session-field,
+.session-note,
+.session-turn,
+.session-event {
+  border: 1px solid #d8e4f8;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.session-field {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.55rem 0.65rem;
+}
+
+.session-field span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.session-field strong {
+  overflow-wrap: anywhere;
+}
+
+.session-note {
+  padding: 0.7rem 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.session-transcript,
+.session-events {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.session-turn {
+  padding: 0.7rem 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.session-turn-assistant {
+  border-left: 4px solid var(--success);
+}
+
+.session-turn-user {
+  border-left: 4px solid var(--hse-blue-soft);
+}
+
+.session-event {
+  padding: 0.5rem 0.65rem;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-status.is-error {
+  color: var(--danger);
+  border-color: #f1b8b8;
+  background: #fff3f3;
+}
+
 .debug-summary:focus-visible,
 .btn:focus-visible,
 input:focus-visible,
@@ -905,6 +1171,15 @@ select:focus-visible {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .admin-log-controls {
+    align-items: stretch;
+  }
+
+  .admin-log-controls .profile-select,
+  .admin-auto-refresh {
+    width: 100%;
+  }
 }
 
 @media (max-width: 720px) {
@@ -923,6 +1198,16 @@ select:focus-visible {
   .subtitle,
   .strapline {
     font-size: 0.9rem;
+  }
+
+  .admin-session-bar,
+  .admin-login-form {
+    align-items: stretch;
+  }
+
+  .admin-login-form input[type='password'] {
+    min-width: 0;
+    max-width: none;
   }
 
   .main {

@@ -31,6 +31,20 @@ function filterProductsByLockedParams(products, locked) {
 }
 
 export async function strictSearchByParams(attrs = {}, options = {}) {
+  if (window.LAWVOICE_COMMERCE_CATALOG_ENABLED !== true) {
+    return {
+      products: [],
+      params_locked: {
+        thickness_mm: toFiniteNumber(attrs.thickness ?? attrs.thickness_mm),
+        width_mm: toFiniteNumber(attrs.width ?? attrs.width_mm),
+        length_mm: toFiniteNumber(attrs.length ?? attrs.length_mm),
+        category: attrs.category || null,
+        material: attrs.material || null,
+        coating: attrs.coating || null
+      },
+      disabled: true
+    };
+  }
   const limit = Math.max(1, Math.min(Number(options.limit) || 10, 20));
   const paramsLocked = {
     thickness_mm: toFiniteNumber(attrs.thickness ?? attrs.thickness_mm),

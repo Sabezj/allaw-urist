@@ -11,6 +11,15 @@ import LawVoiceDialogManager from './modules/lawvoiceDialogManager.js';
 
 window.logger = window.logger || console;
 const logger = window.logger;
+const COMMERCE_CATALOG_ENABLED = window.LAWVOICE_COMMERCE_CATALOG_ENABLED === true;
+const ADMIN_ONLY_TOOL_NAMES = new Set([
+  'search_products',
+  'list_products',
+  'list_categories',
+  'add_to_cart',
+  'checkout',
+  'cancel_order'
+]);
 function normalizeSpecAttrs(rawParams = {}) {
   // Берём атрибуты отовсюду: attrs | filters | specs | сам корень
   const src = {
@@ -194,6 +203,10 @@ class VoiceAgent {
     this.queryCount = 0;
     this.sessionsChart = null;
     this.tokensChart = null;
+    this.sessionRecordLocalId = null;
+    this.sessionTranscript = [];
+    this.sessionEvents = [];
+    this.sessionRecordingSaved = false;
 
     // Pricing configuration (per 1M tokens) - Updated with correct OpenAI pricing
     this.pricing = {
@@ -257,6 +270,13 @@ class VoiceAgent {
       statusConnection: document.getElementById('status-connection'),
       statusVoice: document.getElementById('status-voice'),
       statusModel: document.getElementById('status-model'),
+      adminRoleBadge: document.getElementById('admin-role-badge'),
+      adminAuthStatus: document.getElementById('admin-auth-status'),
+      adminLoginError: document.getElementById('admin-login-error'),
+      adminLoginForm: document.getElementById('admin-login-form'),
+      adminLoginKey: document.getElementById('admin-login-key'),
+      adminLoginBtn: document.getElementById('admin-login-btn'),
+      adminLogoutBtn: document.getElementById('admin-logout-btn'),
       conversationLog: document.getElementById('conversation-log'),
       activityLog: document.getElementById('agent-activity-log'),
       clearLogBtn: document.getElementById('clear-log'),
@@ -301,6 +321,7 @@ class VoiceAgent {
       profileSelect: document.getElementById('profile-select'),
       activeProfile: document.getElementById('active-profile'),
       ageModeSelect: document.getElementById('age-mode'),
+      profileDetails: document.getElementById('profile-details'),
       adaptiveModeState: document.getElementById('adaptive-mode-state'),
       profileName: document.getElementById('profile-name'),
       profileVoice: document.getElementById('profile-voice'),
@@ -318,7 +339,11 @@ class VoiceAgent {
       refreshKnowledgeBtn: document.getElementById('refresh-knowledge'),
       knowledgeSearch: document.getElementById('knowledge-search'),
       knowledgeStatus: document.getElementById('knowledge-status'),
-      knowledgeDocumentsBody: document.getElementById('knowledge-documents-body')
+      knowledgeDocumentsBody: document.getElementById('knowledge-documents-body'),
+      grafanaLink: document.getElementById('grafana-link'),
+      prometheusLink: document.getElementById('prometheus-link'),
+      metricsLink: document.getElementById('metrics-link'),
+      observabilityStatus: document.getElementById('observability-status')
     };
 
     this.profiles = [];
@@ -353,15 +378,15 @@ class VoiceAgent {
     this.lastActionPlanObjective = '';
     this.lastActionPlanRequestedAt = 0;
     this.awaitingConfirmation = false;
+    this.authState = { role: 'user', isAdmin: false, canManage: false, observability: null };
     this.setupEventListeners();
     this.setupCanvas();
     this.updateTokenDisplay();
     this.updatePricingDisplay();
     this.fetchCsrfToken();
     this.renderCart();
-    this.fetchAuthToken().finally(() => this.loadKnowledgeDocuments());
     this.loadProfiles();
-    this.connectLogStream();
+    this.refreshAuthState({ silent: true });
   }
 
   setupEventListeners() {
@@ -369,6 +394,13 @@ class VoiceAgent {
     this.elements.stopBtn.addEventListener('click', () => this.stopSession());
     this.elements.muteBtn.addEventListener('click', () => this.toggleMute());
     this.elements.clearLogBtn.addEventListener('click', () => this.clearConversationLog());
+    window.addEventListener('pagehide', () => this.sendSessionRecordingBeacon('page_unload'));
+    if (this.elements.adminLoginForm) {
+      this.elements.adminLoginForm.addEventListener('submit', (event) => this.submitAdminLogin(event));
+    }
+    if (this.elements.adminLogoutBtn) {
+      this.elements.adminLogoutBtn.addEventListener('click', () => this.logoutAdmin());
+    }
     if (this.elements.viewProductsBtn) {
       this.elements.viewProductsBtn.addEventListener('click', () => this.loadProducts());
     }
@@ -816,8 +848,132 @@ class VoiceAgent {
     this.drawVisualization();
   }
 
+  resetSessionRecording() {
+    const randomPart = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    this.sessionRecordLocalId = `browser-${randomPart}`;
+    this.sessionTranscript = [];
+    this.sessionEvents = [];
+    this.sessionRecordingSaved = false;
+  }
+
+  recordSessionEntry(role, text, meta = {}) {
+    const normalizedRole = `${role || ''}`.toLowerCase();
+    const message = `${text ?? ''}`.trim();
+    if (!message || message === '[Audio message]') return;
+
+    if (normalizedRole === 'user' || normalizedRole === 'assistant') {
+      const previous = this.sessionTranscript[this.sessionTranscript.length - 1];
+      if (previous?.role === normalizedRole && previous.text === message) return;
+      this.sessionTranscript.push({
+        role: normalizedRole,
+        text: message,
+        at: new Date().toISOString()
+      });
+      if (this.sessionTranscript.length > 300) this.sessionTranscript.shift();
+      return;
+    }
+
+    if (normalizedRole === 'error' || normalizedRole === 'system') {
+      this.recordSessionEvent(normalizedRole, message, meta);
+    }
+  }
+
+  recordSessionEvent(type, message = '', meta = {}) {
+    const entry = {
+      type: `${type || 'event'}`.slice(0, 64),
+      message: `${message ?? ''}`.slice(0, 6000),
+      at: new Date().toISOString()
+    };
+    if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+      entry.meta = meta;
+    }
+    this.sessionEvents.push(entry);
+    if (this.sessionEvents.length > 500) this.sessionEvents.shift();
+  }
+
+  buildSessionSummary(endReason = 'session_ended') {
+    const userTurns = this.sessionTranscript.filter(item => item.role === 'user');
+    const assistantTurns = this.sessionTranscript.filter(item => item.role === 'assistant');
+    const intents = this.sessionEvents
+      .filter(item => item.type === 'intent' && item.meta?.mappedName)
+      .map(item => item.meta.mappedName);
+    const firstUserText = userTurns[0]?.text || '';
+    const lastAssistantText = [...assistantTurns].reverse()[0]?.text || '';
+    const uniqueIntents = [...new Set(intents)].slice(0, 8);
+
+    return {
+      title: firstUserText ? firstUserText.slice(0, 140) : 'Диалог без распознанной пользовательской реплики',
+      short: [
+        `Пользовательских реплик: ${userTurns.length}. Ответов ассистента: ${assistantTurns.length}.`,
+        uniqueIntents.length ? `Интенты: ${uniqueIntents.join(', ')}.` : ''
+      ].filter(Boolean).join(' '),
+      outcome: endReason,
+      firstUserRequest: firstUserText.slice(0, 1200),
+      lastAssistantAnswer: lastAssistantText.slice(0, 1200)
+    };
+  }
+
+  buildSessionRecordingPayload(endReason = 'session_ended') {
+    const durationMs = this.sessionStartTime ? Date.now() - this.sessionStartTime : 0;
+    return {
+      localSessionId: this.sessionRecordLocalId,
+      openaiSessionId: this.sessionData?.id || null,
+      startedAt: this.sessionStartTime ? new Date(this.sessionStartTime).toISOString() : new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      durationMs,
+      endReason,
+      model: this.sessionData?.model || this.elements.statusModel?.textContent || '',
+      voice: this.sessionData?.voice || this.elements.statusVoice?.textContent || '',
+      profile: this.currentProfile?.name || this.currentProfile?.id || this.elements.profileSelect?.value || '',
+      mode: this.isLawVoiceMode() ? 'lawvoice' : 'default',
+      metrics: {
+        tokens: this.getTotalTokens(),
+        queries: this.queryCount,
+        estimatedCostUsd: this.getEstimatedSessionCost?.() || 0,
+        risk: this.adaptiveState?.riskLevel || '',
+        anxiety: this.adaptiveState?.anxietyLevel || ''
+      },
+      summary: this.buildSessionSummary(endReason),
+      transcript: this.sessionTranscript,
+      events: this.sessionEvents
+    };
+  }
+
+  async saveSessionRecording(endReason = 'session_ended') {
+    if (this.sessionRecordingSaved) return;
+    if (!this.sessionStartTime && !this.sessionTranscript.length && !this.sessionEvents.length) return;
+    this.sessionRecordingSaved = true;
+
+    try {
+      const response = await fetch('/api/session-recordings', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.buildSessionRecordingPayload(endReason))
+      });
+      if (!response.ok) throw new Error(`Session recording save failed: ${response.status}`);
+      this.agentLog('Session recording saved', 'info');
+    } catch (error) {
+      console.error('Failed to save session recording', error);
+      this.sessionRecordingSaved = false;
+    }
+  }
+
+  sendSessionRecordingBeacon(endReason = 'page_unload') {
+    if (this.sessionRecordingSaved) return;
+    if (!this.sessionStartTime && !this.sessionTranscript.length && !this.sessionEvents.length) return;
+    if (!navigator.sendBeacon) return;
+
+    const body = JSON.stringify(this.buildSessionRecordingPayload(endReason));
+    const sent = navigator.sendBeacon('/api/session-recordings', new Blob([body], { type: 'application/json' }));
+    if (sent) {
+      this.sessionRecordingSaved = true;
+    }
+  }
+
   async startSession() {
     try {
+      this.resetSessionRecording();
       this.agentLog('Starting session');
       this.updateStatus('Connecting...', 'connecting');
       this.elements.startBtn.disabled = true;
@@ -868,7 +1024,7 @@ class VoiceAgent {
     } catch (error) {
       logger.error('Failed to start session', error);
       this.log('error', `Failed to start session: ${error.message}`);
-      await this.stopSession(); // Reset state after failure
+      await this.stopSession('session_start_failed'); // Reset state after failure
     }
   }
 
@@ -1229,6 +1385,10 @@ class VoiceAgent {
   
   
   async searchProducts(rawQuery) {
+    if (!COMMERCE_CATALOG_ENABLED) {
+      logger.info('Commerce catalog search skipped because the catalog is disabled');
+      return [];
+    }
     const q = this.normaliseQuery(rawQuery);
     // Build query params for our internal API. Vector and trigram toggles control whether those searches run on the server.
     const params = new URLSearchParams({
@@ -1281,6 +1441,7 @@ class VoiceAgent {
     return enriched;
   }
   async searchBySpecs(specs) {
+    if (!COMMERCE_CATALOG_ENABLED) return [];
     const normalized = normalizeSpecAttrs(specs || {});
     const queryParts = [];
     if (normalized.category) queryParts.push(String(normalized.category));
@@ -1427,8 +1588,9 @@ class VoiceAgent {
         if (event.transcript) {
           this.log('user', event.transcript);
           this.agentLog(`Agent parsing user query: ${event.transcript}`);
-          // Look for price queries like "цена [product]" and inject product data plus one relevant upsell if in Boost-Seller mode
-          this.handleProductQuery(event.transcript);
+          if (COMMERCE_CATALOG_ENABLED && !this.isLawVoiceMode()) {
+            this.handleProductQuery(event.transcript);
+          }
         }
         break;
 
@@ -1563,6 +1725,14 @@ class VoiceAgent {
       if (originalName && originalName !== mappedName) {
         this.agentLog(`Tool alias mapped: ${originalName} → ${mappedName}`, 'intent');
       }
+      this.recordSessionEvent('intent', `Intent detected: ${mappedName || 'unknown'}`, {
+        transcript,
+        originalName,
+        mappedName: mappedName || '',
+        confidence,
+        meta,
+        params: pruned
+      });
       if (this.isLawVoiceMode()) {
         const adaptiveIntentName = mappedName || meta?.guessed_intent || 'unknown';
         this.updateAdaptiveContext(
@@ -1579,6 +1749,11 @@ class VoiceAgent {
       }
 
       this.agentLog(`Detected intent: ${mappedName}`, 'intent');
+
+      if (!this.isAdminView() && ADMIN_ONLY_TOOL_NAMES.has(mappedName)) {
+        this.sendContextText('Я могу помочь советом и рекомендацией по правовой ситуации, но служебные действия и материалы доступны только администратору.');
+        return;
+      }
 
       if (mappedName === 'clarify_intent' || meta?.clarify) {
         const question = params.question || fallbackClarifyText;
@@ -1605,7 +1780,7 @@ class VoiceAgent {
       if (lawVoiceIntents.has(mappedName)) {
         const contextResult = this.registerIntentContext(mappedName, params, transcript, meta);
         let directive = contextResult.directive;
-        if (mappedName === 'legal_support_request') {
+        if (mappedName === 'legal_support_request' && this.isAdminView()) {
           this.agentLog('Auto action-plan requested', 'intent');
           const plan = await this.requestActionPlanForLegalSupport(
             transcript,
@@ -1622,6 +1797,10 @@ class VoiceAgent {
       }
       switch (mappedName) {
         case 'search_products': {
+          if (!COMMERCE_CATALOG_ENABLED) {
+            this.sendContextText('Коммерческий каталог отключён. Я могу искать и использовать только материалы базы знаний LawVoice.');
+            break;
+          }
           const attrsRaw = pruned;
           const attrs = normalizeSpecAttrs(attrsRaw);
           const hasAnySpec = Object.keys(attrs).length > 0;
@@ -1683,6 +1862,10 @@ class VoiceAgent {
           break;
         }
         case 'list_products': {
+          if (!COMMERCE_CATALOG_ENABLED) {
+            this.sendContextText('Коммерческий каталог отключён. Материалы LawVoice доступны в разделе базы знаний.');
+            break;
+          }
           // Enumerate a subset of products when the user asks for the assortment.
           const limit = params.limit || 10;
           this.agentLog(`Listing first ${limit} products`, 'tool');
@@ -1709,6 +1892,10 @@ class VoiceAgent {
           break;
         }
         case 'list_categories': {
+          if (!COMMERCE_CATALOG_ENABLED) {
+            this.sendContextText('Коммерческий каталог отключён. Для LawVoice используются документы базы знаний.');
+            break;
+          }
           // Return the available product categories derived from product names
           const limit = params.limit || '';
           this.agentLog('Listing product categories', 'tool');
@@ -1823,6 +2010,7 @@ class VoiceAgent {
   }
   // Detect price queries in transcripts and fetch product data from the server
   async handleProductQuery(transcript) {
+    if (!COMMERCE_CATALOG_ENABLED || this.isLawVoiceMode()) return;
     const match = transcript.match(/цена\s+(.+)/i);
     if (!match) return;
     const query = match[1].trim();
@@ -2053,7 +2241,7 @@ class VoiceAgent {
     this.log('system', this.isMuted ? 'Microphone muted' : 'Microphone unmuted');
   }
 
-  async stopSession() {
+  async stopSession(endReason = 'manual_stop') {
     if (this.pc) {
       this.pc.close();
       this.pc = null;
@@ -2097,6 +2285,7 @@ class VoiceAgent {
 
     this.log('system', 'Session ended');
     this.agentLog('Session ended');
+    await this.saveSessionRecording(endReason);
 
     // Send analytics to server
     const durationMs = this.sessionStartTime ? Date.now() - this.sessionStartTime : 0;
@@ -2133,6 +2322,7 @@ class VoiceAgent {
   }
 
   connectLogStream() {
+    if (!this.isAdminView() || !this.elements.activityLog) return;
     try {
       const source = new EventSource('/api/agent-console');
       source.onmessage = (event) => {
@@ -2151,6 +2341,7 @@ class VoiceAgent {
 
   // Record internal agent activity
   agentLog(message, type = 'info') {
+    this.recordSessionEvent(type === 'info' ? 'agent' : type, message);
     const container = this.elements.activityLog;
     if (!container) return;
     const timestamp = new Date().toISOString().replace('T', ' ').split('.')[0];
@@ -2166,14 +2357,18 @@ class VoiceAgent {
     if (type === 'user') {
       this.queryCount++;
     }
+    this.recordSessionEntry(type, message);
     const timestamp = new Date().toLocaleTimeString();
     const logEntry = document.createElement('div');
     logEntry.className = `log-entry log-${type}`;
 
-    logEntry.innerHTML = `
-      <div class="log-timestamp">${timestamp}</div>
-      <div class="log-content">${message}</div>
-    `;
+    const timestampNode = document.createElement('div');
+    timestampNode.className = 'log-timestamp';
+    timestampNode.textContent = timestamp;
+    const contentNode = document.createElement('div');
+    contentNode.className = 'log-content';
+    contentNode.textContent = message;
+    logEntry.append(timestampNode, contentNode);
 
     this.elements.conversationLog.appendChild(logEntry);
     this.elements.conversationLog.scrollTop = this.elements.conversationLog.scrollHeight;
@@ -2334,6 +2529,9 @@ class VoiceAgent {
   async fetchAuthToken() {
     try {
       const res = await fetch('/api/auth/token');
+      if (!res.ok) {
+        return null;
+      }
       const data = await res.json();
       if (data.token) {
         localStorage.setItem('jwt', data.token);
@@ -2344,6 +2542,167 @@ class VoiceAgent {
       logger.error('Token fetch fail', err);
       return null;
     }
+  }
+
+  isAdminView() {
+    return Boolean(this.authState?.isAdmin);
+  }
+
+  setAdminError(message = '') {
+    if (!this.elements.adminLoginError) return;
+    this.elements.adminLoginError.hidden = !message;
+    this.elements.adminLoginError.textContent = message;
+  }
+
+  closeLogStream() {
+    if (this.logSource) {
+      this.logSource.close();
+      this.logSource = null;
+    }
+  }
+
+  applyAdminUi() {
+    const isAdmin = this.isAdminView();
+    document.body.dataset.role = isAdmin ? 'admin' : 'user';
+    document.querySelectorAll('[data-admin-only]').forEach((element) => {
+      element.classList.toggle('is-hidden-by-role', !isAdmin);
+    });
+    if (this.elements.profileDetails && !isAdmin) {
+      this.elements.profileDetails.open = false;
+    }
+    if (this.elements.adminRoleBadge) {
+      this.elements.adminRoleBadge.textContent = isAdmin ? 'Администратор' : 'Пользователь';
+    }
+    if (this.elements.adminAuthStatus) {
+      this.elements.adminAuthStatus.textContent = isAdmin
+        ? 'Режим администратора: доступны материалы, управление профилями и observability.'
+        : 'Пользовательский режим: доступен только диалог и рекомендации.';
+    }
+    if (this.elements.adminLoginBtn) {
+      this.elements.adminLoginBtn.hidden = isAdmin;
+      this.elements.adminLoginBtn.classList.toggle('is-hidden-by-role', isAdmin);
+    }
+    if (this.elements.adminLogoutBtn) {
+      this.elements.adminLogoutBtn.hidden = !isAdmin;
+      this.elements.adminLogoutBtn.classList.toggle('is-hidden-by-role', !isAdmin);
+    }
+    if (this.elements.adminLoginKey) {
+      this.elements.adminLoginKey.hidden = isAdmin;
+      this.elements.adminLoginKey.disabled = isAdmin;
+      this.elements.adminLoginKey.classList.toggle('is-hidden-by-role', isAdmin);
+      if (isAdmin) {
+        this.elements.adminLoginKey.value = '';
+      }
+    }
+    const monitoring = this.authState?.observability || null;
+    if (monitoring?.grafanaUrl && this.elements.grafanaLink) {
+      this.elements.grafanaLink.href = monitoring.grafanaUrl;
+    }
+    if (monitoring?.prometheusUrl && this.elements.prometheusLink) {
+      this.elements.prometheusLink.href = monitoring.prometheusUrl;
+    }
+    if (monitoring?.metricsUrl && this.elements.metricsLink) {
+      this.elements.metricsLink.href = monitoring.metricsUrl;
+    }
+    if (this.elements.observabilityStatus) {
+      this.elements.observabilityStatus.textContent = isAdmin
+        ? 'Grafana, Prometheus и endpoint метрик доступны для контроля стека.'
+        : 'Панель мониторинга доступна администратору.';
+    }
+    this.updateKnowledgeAdminUi();
+    if (isAdmin) {
+      if (!this.logSource) {
+        this.connectLogStream();
+      }
+      this.loadKnowledgeDocuments();
+      return;
+    }
+    this.closeLogStream();
+    this.knowledgeDocuments = [];
+    this.renderKnowledgeDocuments([], 'Доступно только администратору.');
+    this.setKnowledgeStatus('Загрузка и управление базой знаний доступны только администратору.', false);
+  }
+
+  async refreshAuthState({ silent = false } = {}) {
+    try {
+      const res = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) {
+        throw new Error(`Auth state request failed: ${res.status}`);
+      }
+      this.authState = await res.json();
+      this.applyAdminUi();
+      if (!silent) {
+        this.setAdminError('');
+      }
+      return this.authState;
+    } catch (err) {
+      logger.error('Failed to refresh auth state', err);
+      this.authState = { role: 'user', isAdmin: false, canManage: false, observability: null };
+      this.applyAdminUi();
+      if (!silent) {
+        this.setAdminError('Не удалось обновить статус авторизации.');
+      }
+      return this.authState;
+    }
+  }
+
+  async submitAdminLogin(event) {
+    event.preventDefault();
+    const apiKey = (this.elements.adminLoginKey?.value || '').trim();
+    if (!apiKey) {
+      this.setAdminError('Введите ADMIN_API_KEY.');
+      return;
+    }
+    this.setAdminError('');
+    try {
+      const res = await fetch('/api/auth/admin/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: this.buildApiHeaders(true),
+        body: JSON.stringify({ apiKey })
+      });
+      if (!res.ok) {
+        const details = await readErrorMessage(res);
+        throw new Error(details || 'Не удалось выполнить вход.');
+      }
+      this.authState = await res.json();
+      this.applyAdminUi();
+      this.setAdminError('');
+    } catch (err) {
+      logger.error('Admin login failed', err);
+      this.setAdminError('Ошибка входа администратора. Проверьте ключ.');
+    }
+  }
+
+  async logoutAdmin() {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: this.buildApiHeaders(false)
+      });
+    } catch (err) {
+      logger.error('Admin logout failed', err);
+    } finally {
+      this.authState = { role: 'user', isAdmin: false, canManage: false, observability: null };
+      this.applyAdminUi();
+      this.setAdminError('');
+    }
+  }
+
+  updateKnowledgeAdminUi() {
+    const isAdmin = this.isAdminView();
+    [
+      this.elements.knowledgeTitle,
+      this.elements.knowledgeFile,
+      this.elements.uploadKnowledgeBtn,
+      this.elements.refreshKnowledgeBtn,
+      this.elements.knowledgeSearch
+    ].forEach((element) => {
+      if (element) {
+        element.disabled = !isAdmin;
+      }
+    });
   }
 
   buildApiHeaders(includeJson = true) {
@@ -2446,6 +2805,7 @@ class VoiceAgent {
   async requestActionPlanForLegalSupport(transcript, params = {}, dialogState = {}) {
     const objective = `${params?.query_text || transcript || ''}`.trim();
     if (!objective) return null;
+    if (!this.isAdminView()) return null;
 
     const now = Date.now();
     const normalizedObjective = objective.toLowerCase();
@@ -2458,10 +2818,6 @@ class VoiceAgent {
     }
     this.lastActionPlanObjective = normalizedObjective;
     this.lastActionPlanRequestedAt = now;
-
-    if (!localStorage.getItem('jwt')) {
-      await this.fetchAuthToken();
-    }
 
     const constraints = [
       'Не запрашивать лишние персональные данные.',
@@ -2488,19 +2844,11 @@ class VoiceAgent {
     this.updateDebugInfo();
 
     try {
-      let response = await fetch('/api/action-plan', {
+      const response = await fetch('/api/action-plan', {
         method: 'POST',
         headers: this.buildApiHeaders(true),
         body: JSON.stringify(payload)
       });
-      if (response.status === 401) {
-        await this.fetchAuthToken();
-        response = await fetch('/api/action-plan', {
-          method: 'POST',
-          headers: this.buildApiHeaders(true),
-          body: JSON.stringify(payload)
-        });
-      }
       if (!response.ok) {
         const details = await readErrorMessage(response);
         throw new Error(details);
@@ -2533,8 +2881,11 @@ class VoiceAgent {
 
   async loadKnowledgeDocuments() {
     if (!this.elements.knowledgeDocumentsBody) return;
-    if (!localStorage.getItem('jwt')) {
-      await this.fetchAuthToken();
+    if (!this.isAdminView()) {
+      this.knowledgeDocuments = [];
+      this.renderKnowledgeDocuments([], 'Доступно только администратору.');
+      this.setKnowledgeStatus('Загрузка и управление базой знаний доступны только администратору.', false);
+      return;
     }
     const q = (this.elements.knowledgeSearch?.value || '').trim();
     const params = new URLSearchParams({ limit: '100' });
@@ -2542,14 +2893,12 @@ class VoiceAgent {
     const url = `/api/knowledge/documents?${params.toString()}`;
 
     try {
-      let res = await fetch(url, {
+      const res = await fetch(url, {
         headers: this.buildApiHeaders(false)
       });
       if (res.status === 401) {
-        await this.fetchAuthToken();
-        res = await fetch(url, {
-          headers: this.buildApiHeaders(false)
-        });
+        await this.refreshAuthState({ silent: true });
+        throw new Error('Требуется вход администратора');
       }
       if (!res.ok) {
         const details = await readErrorMessage(res);
@@ -2566,19 +2915,19 @@ class VoiceAgent {
       }
     } catch (err) {
       logger.error('Failed to load knowledge documents', err);
-      this.renderKnowledgeDocuments([]);
+      this.renderKnowledgeDocuments([], 'Не удалось загрузить список документов.');
       this.setKnowledgeStatus(`Ошибка загрузки списка: ${err.message}`, true);
     }
   }
 
-  renderKnowledgeDocuments(documents = []) {
+  renderKnowledgeDocuments(documents = [], emptyMessage = 'Список документов пуст.') {
     if (!this.elements.knowledgeDocumentsBody) return;
     this.elements.knowledgeDocumentsBody.innerHTML = '';
     if (!documents.length) {
       const emptyRow = document.createElement('tr');
       const cell = document.createElement('td');
       cell.colSpan = 6;
-      cell.textContent = 'Список документов пуст.';
+      cell.textContent = emptyMessage;
       emptyRow.appendChild(cell);
       this.elements.knowledgeDocumentsBody.appendChild(emptyRow);
       return;
@@ -2624,6 +2973,10 @@ class VoiceAgent {
   }
 
   async uploadKnowledgeDocument() {
+    if (!this.isAdminView()) {
+      this.setKnowledgeStatus('Для загрузки документа требуется вход администратора.', true);
+      return;
+    }
     const file = this.elements.knowledgeFile?.files?.[0];
     if (!file) {
       this.setKnowledgeStatus('Выберите файл для загрузки.', true);
@@ -2641,9 +2994,6 @@ class VoiceAgent {
     this.setKnowledgeStatus(`Загрузка "${file.name}"...`, false);
 
     try {
-      if (!localStorage.getItem('jwt')) {
-        await this.fetchAuthToken();
-      }
       const text = await file.text();
       if (!text || !text.trim()) {
         throw new Error('Файл пустой или не содержит текстовых данных');
@@ -2656,18 +3006,14 @@ class VoiceAgent {
         content: text
       };
 
-      let res = await fetch('/api/knowledge/documents', {
+      const res = await fetch('/api/knowledge/documents', {
         method: 'POST',
         headers: this.buildApiHeaders(true),
         body: JSON.stringify(payload)
       });
       if (res.status === 401) {
-        await this.fetchAuthToken();
-        res = await fetch('/api/knowledge/documents', {
-          method: 'POST',
-          headers: this.buildApiHeaders(true),
-          body: JSON.stringify(payload)
-        });
+        await this.refreshAuthState({ silent: true });
+        throw new Error('Требуется вход администратора');
       }
       if (!res.ok) {
         const details = await readErrorMessage(res);
@@ -2685,30 +3031,28 @@ class VoiceAgent {
       logger.error('Knowledge document upload failed', err);
       this.setKnowledgeStatus(`Ошибка загрузки: ${err.message}`, true);
     } finally {
-      if (uploadBtn) uploadBtn.disabled = false;
+      this.updateKnowledgeAdminUi();
     }
   }
 
   async deleteKnowledgeDocument(documentId, title = 'документ') {
     if (!documentId) return;
+    if (!this.isAdminView()) {
+      this.setKnowledgeStatus('Для удаления документа требуется вход администратора.', true);
+      return;
+    }
     const ok = window.confirm(`Удалить документ "${title}"?`);
     if (!ok) return;
     this.setKnowledgeStatus(`Удаление "${title}"...`, false);
 
     try {
-      if (!localStorage.getItem('jwt')) {
-        await this.fetchAuthToken();
-      }
-      let res = await fetch(`/api/knowledge/documents/${encodeURIComponent(documentId)}`, {
+      const res = await fetch(`/api/knowledge/documents/${encodeURIComponent(documentId)}`, {
         method: 'DELETE',
         headers: this.buildApiHeaders(false)
       });
       if (res.status === 401) {
-        await this.fetchAuthToken();
-        res = await fetch(`/api/knowledge/documents/${encodeURIComponent(documentId)}`, {
-          method: 'DELETE',
-          headers: this.buildApiHeaders(false)
-        });
+        await this.refreshAuthState({ silent: true });
+        throw new Error('Требуется вход администратора');
       }
       if (!res.ok) {
         const details = await readErrorMessage(res);
@@ -2724,6 +3068,19 @@ class VoiceAgent {
   }
 
   async loadProducts() {
+    if (!this.isAdminView()) return [];
+    if (!COMMERCE_CATALOG_ENABLED) {
+      localStorage.removeItem('products');
+      this.products = [];
+      if (this.elements.productList) {
+        this.elements.productList.innerHTML = '';
+        const li = document.createElement('li');
+        li.textContent = 'Коммерческий каталог отключён. Используйте базу знаний для документов LawVoice.';
+        this.elements.productList.appendChild(li);
+      }
+      await this.loadKnowledgeDocuments();
+      return [];
+    }
     try {
       let products = localStorage.getItem('products');
       if (products) {
@@ -2796,6 +3153,7 @@ class VoiceAgent {
   }
 
   async submitOrder() {
+    if (!this.isAdminView()) return;
     if (!this.cart.length) return;
     const items = this.cart.map(item => ({
       product_id: item.id,
