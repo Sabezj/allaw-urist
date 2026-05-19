@@ -38,6 +38,14 @@ const config = convict({
       sensitive: true
     }
   },
+  commerce: {
+    catalogEnabled: {
+      doc: 'Enable legacy commerce product catalog/search endpoints',
+      format: Boolean,
+      default: false,
+      env: 'ENABLE_COMMERCE_CATALOG'
+    }
+  },
   auth: {
     devNoAuth: {
       doc: 'Disable JWT for development environments',
